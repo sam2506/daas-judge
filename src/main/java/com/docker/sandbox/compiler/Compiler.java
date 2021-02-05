@@ -1,0 +1,229 @@
+package com.docker.sandbox.compiler;
+
+import com.docker.sandbox.compiler.entities.CompilerDetails;
+import com.docker.sandbox.submission.entities.SubmissionRequest;
+import com.docker.sandbox.testcase.TestCaseResponse;
+import com.docker.sandbox.verdict.Verdict;
+import lombok.Setter;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+
+@Component
+@ConfigurationProperties(prefix = "completed.testcases")
+@Setter
+public class Compiler {
+
+    private String exchange;
+    private String routingKey;
+
+    private final String CURRENT_DIRECTORY =  System.getProperty("user.dir") +
+            "/src/main/java/com/docker/sandbox/compiler";
+    private final String SANDBOX_DIRECTORY = System.getProperty("user.dir") +
+            "/src/main/java/com/docker/sandbox";
+    private final String[][] COMPILERS = {
+            {"CPP", "g++", ".cpp", "a.out"},
+            {"C", "gcc", ".c", "a.out"},
+            {"PYTHON", "python", ".py", ""},
+    };
+    private final int ACCEPTED_EXIT_STATUS = 0;
+    private final int WRONG_ANSWER_EXIT_STATUS = 1;
+    private final int TIMEOUT_EXIT_STATUS = 124;
+    private final int RUNTIME_ERROR_EXIT_STATUS = 134;
+    private final int MEMORY_LIMIT_EXCEEDED_EXIT_STATUS = 134;
+
+    @Autowired
+    private RabbitTemplate template;
+
+    public static void printResults(Process proc) throws IOException {
+        try
+        {
+            InputStream stdin = proc.getInputStream();
+            InputStreamReader isr1 = new InputStreamReader(stdin);
+            BufferedReader br1 = new BufferedReader(isr1);
+            String line1 = null;
+            System.out.println("<OUTPUT>");
+            while ( (line1 = br1.readLine()) != null)
+                System.out.println(line1);
+            System.out.println("</OUTPUT>");
+            InputStream stderr = proc.getErrorStream();
+            InputStreamReader isr = new InputStreamReader(stderr);
+            BufferedReader br = new BufferedReader(isr);
+            String line = null;
+            System.out.println("<ERROR>");
+            while ( (line = br.readLine()) != null)
+                System.out.println(line);
+            System.out.println("</ERROR>");
+            int exitVal = proc.waitFor();
+            System.out.println("Process exitValue: " + exitVal);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    private CompilerDetails getCompilerDetails(String language) {
+        CompilerDetails compilerDetails = new CompilerDetails();
+        for(String[] compiler : COMPILERS) {
+            if(compiler[0].equals(language)) {
+                compilerDetails.setCompilerName(compiler[1]);
+                compilerDetails.setExtension(compiler[2]);
+                compilerDetails.setExecutable(compiler[3]);
+            }
+        }
+        return compilerDetails;
+    }
+
+    private String getOutputOfProcess(Process process) {
+        InputStream stdin = process.getInputStream();
+        InputStreamReader isr = new InputStreamReader(stdin);
+        BufferedReader br = new BufferedReader(isr);
+        String output = "";
+        try {
+            output = br.readLine();
+        } catch(IOException e) {
+            e.printStackTrace();
+        }
+        return output;
+    }
+
+    private int getNoOfTestCases(String testsFolderName) {
+        int noOfTestCases = 0;
+        try {
+            String[] cmd = {
+                "/bin/sh",
+                "-c",
+                "ls " + SANDBOX_DIRECTORY + "/" + testsFolderName + " " + "| grep 'input-.*.txt' | wc -l"
+            };
+            Process process = Runtime.getRuntime().exec(cmd);
+            noOfTestCases = Integer.parseInt(getOutputOfProcess(process));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return noOfTestCases;
+    }
+
+    private boolean compileCode(SubmissionRequest submissionRequest,
+                               CompilerDetails compilerDetails, String containerId) {
+        String userName = submissionRequest.getUserName();
+        boolean isCompilationSuccessful = false;
+        try {
+            Runtime.getRuntime().exec("chmod +x " + CURRENT_DIRECTORY + "/Compile.sh");
+            String[] compileScript = {
+                    "sh", CURRENT_DIRECTORY + "/Compile.sh",
+                    compilerDetails.getCompilerName(),
+                    "" + userName + compilerDetails.getExtension()
+                    , containerId
+                    , "/home/" + submissionRequest.getSubmissionId()
+                    , compilerDetails.getExecutable()
+            };
+            Process process = Runtime.getRuntime().exec(compileScript);
+            printResults(process);
+            int exitStatus = process.waitFor();
+            if(exitStatus == 0) {
+                isCompilationSuccessful = true;
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+        return isCompilationSuccessful;
+    }
+
+    private Verdict executeTest(SubmissionRequest submissionRequest,
+                                CompileRequest compileRequest,
+                                CompilerDetails compilerDetails,
+                                String containerId, String testCaseNo) {
+        String userName = submissionRequest.getUserName();
+        Verdict verdict = Verdict.MLE;
+        try {
+            Runtime.getRuntime().exec("chmod +x " + CURRENT_DIRECTORY + "/ExecuteTest.sh");
+            String[] executeTestScript = {"sh", CURRENT_DIRECTORY + "/ExecuteTest.sh",
+                    compilerDetails.getCompilerName(),
+                    "" + userName + compilerDetails.getExtension()
+                    , compilerDetails.getExecutable()
+                    , containerId, testCaseNo
+                    , "/home/" + submissionRequest.getSubmissionId()
+                    , compileRequest.getTimeLimit().toString()
+                    , "" + compileRequest.getMemoryLimit()
+            };
+            Process process = Runtime.getRuntime().exec(executeTestScript);
+            printResults(process);
+            int exitStatus = process.waitFor();
+            if(exitStatus == ACCEPTED_EXIT_STATUS) {
+                verdict = Verdict.AC;
+            }
+            if(exitStatus == WRONG_ANSWER_EXIT_STATUS) {
+                verdict = Verdict.WA;
+            }
+            if(exitStatus == TIMEOUT_EXIT_STATUS) {
+                verdict = Verdict.TLE;
+            }
+            if(exitStatus == RUNTIME_ERROR_EXIT_STATUS) {
+                verdict = Verdict.RE;
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+        return verdict;
+    }
+
+    public String createSandbox(SubmissionRequest submissionRequest) {
+        String[] sandboxRunnerScript = {"sh", CURRENT_DIRECTORY + "/RunSandbox.sh",
+                SANDBOX_DIRECTORY + "/" + submissionRequest.getSubmissionId()
+                , "/home/" + submissionRequest.getSubmissionId()
+        };
+        String containerId = "";
+        try {
+            Runtime.getRuntime().exec("chmod +x " + CURRENT_DIRECTORY + "/RunSandbox.sh");
+            Process process = Runtime.getRuntime().exec(sandboxRunnerScript);
+            process.waitFor();
+            containerId = getOutputOfProcess(process);
+        }  catch (Throwable t) {
+            t.printStackTrace();
+        }
+        return containerId;
+    }
+
+    @RabbitListener(queues = "pending_test_cases_queue")
+    public void judgeSubmission(CompileRequest compileRequest) {
+//        compileRequest.setMemoryLimit(1);
+        SubmissionRequest submissionRequest = compileRequest.getSubmissionRequest();
+        String language = submissionRequest.getLanguageId().toString();
+        String userName = submissionRequest.getUserName();
+        CompilerDetails compilerDetails = getCompilerDetails(language);
+        int noOfTestCases = getNoOfTestCases(submissionRequest.getSubmissionId());
+        try {
+            String containerId = createSandbox(submissionRequest);
+            if(!compilerDetails.getExecutable().equals("")) {
+                boolean isCompilationSuccessful =
+                        compileCode(submissionRequest, compilerDetails, containerId);
+                if (isCompilationSuccessful) {
+                    for (int i = 0; i < noOfTestCases; i++) {
+                        String testCaseNo;
+                        if (i <= 9)
+                            testCaseNo = "0" + i;
+                        else
+                            testCaseNo = "" + i;
+                        Verdict verdict = executeTest(submissionRequest,
+                                compileRequest, compilerDetails, containerId, testCaseNo);
+                        TestCaseResponse testCaseResponse = new TestCaseResponse();
+                        testCaseResponse.setTestCaseNo(i);
+                        testCaseResponse.setVerdict(verdict);
+                        template.convertAndSend(exchange, routingKey, testCaseResponse);
+                    }
+                } else {
+                    template.convertAndSend(exchange, routingKey, "compilation failed");
+                }
+            }
+            Runtime.getRuntime().exec("docker rm -f " + containerId);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
