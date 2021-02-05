@@ -192,7 +192,6 @@ public class Compiler {
 
     @RabbitListener(queues = "pending_test_cases_queue")
     public void judgeSubmission(CompileRequest compileRequest) {
-//        compileRequest.setMemoryLimit(1);
         SubmissionRequest submissionRequest = compileRequest.getSubmissionRequest();
         String language = submissionRequest.getLanguageId().toString();
         String userName = submissionRequest.getUserName();
