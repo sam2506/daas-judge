@@ -1,9 +1,7 @@
-package com.docker.sandbox.compiler;
+package com.docker.sandbox.judge;
 
 
-import com.docker.sandbox.output.entities.Output;
 import com.docker.sandbox.submission.entities.SubmissionRequest;
-import com.docker.sandbox.test.entities.Test;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

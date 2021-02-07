@@ -1,4 +1,4 @@
-package com.docker.sandbox.compiler.entities;
+package com.docker.sandbox.judge.entities;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

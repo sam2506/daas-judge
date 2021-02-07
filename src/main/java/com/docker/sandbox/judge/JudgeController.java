@@ -1,15 +1,18 @@
-package com.docker.sandbox.compiler;
+package com.docker.sandbox.judge;
 
-import com.docker.sandbox.compiler.entities.CompilerDetails;
+import com.docker.sandbox.judge.entities.CompilerDetails;
 import com.docker.sandbox.submission.entities.SubmissionRequest;
 import com.docker.sandbox.testcase.TestCaseResponse;
 import com.docker.sandbox.verdict.Verdict;
 import lombok.Setter;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -19,13 +22,14 @@ import java.io.InputStreamReader;
 @Component
 @ConfigurationProperties(prefix = "completed.testcases")
 @Setter
-public class Compiler {
+@RestController
+public class JudgeController {
 
     private String exchange;
     private String routingKey;
 
     private final String CURRENT_DIRECTORY =  System.getProperty("user.dir") +
-            "/src/main/java/com/docker/sandbox/compiler";
+            "/src/main/java/com/docker/sandbox/judge";
     private final String SANDBOX_DIRECTORY = System.getProperty("user.dir") +
             "/src/main/java/com/docker/sandbox";
     private final String[][] COMPILERS = {
@@ -190,13 +194,15 @@ public class Compiler {
         return containerId;
     }
 
-    @RabbitListener(queues = "pending_test_cases_queue")
-    public void judgeSubmission(CompileRequest compileRequest) {
+    @RequestMapping(value = "/judge", method = RequestMethod.POST)
+    public String judgeSubmission(@RequestBody CompileRequest compileRequest) {
+        System.out.println(compileRequest);
         SubmissionRequest submissionRequest = compileRequest.getSubmissionRequest();
         String language = submissionRequest.getLanguageId().toString();
         String userName = submissionRequest.getUserName();
         CompilerDetails compilerDetails = getCompilerDetails(language);
         int noOfTestCases = getNoOfTestCases(submissionRequest.getSubmissionId());
+        String finalVerdict = "AC";
         try {
             String containerId = createSandbox(submissionRequest);
             if(!compilerDetails.getExecutable().equals("")) {
@@ -211,12 +217,15 @@ public class Compiler {
                             testCaseNo = "" + i;
                         Verdict verdict = executeTest(submissionRequest,
                                 compileRequest, compilerDetails, containerId, testCaseNo);
+                        if(!verdict.equals(Verdict.AC))
+                            finalVerdict = "WA";
                         TestCaseResponse testCaseResponse = new TestCaseResponse();
                         testCaseResponse.setTestCaseNo(i);
                         testCaseResponse.setVerdict(verdict);
                         template.convertAndSend(exchange, routingKey, testCaseResponse);
                     }
                 } else {
+                    finalVerdict = "CE";
                     template.convertAndSend(exchange, routingKey, "compilation failed");
                 }
             }
@@ -224,5 +233,6 @@ public class Compiler {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        return finalVerdict;
     }
 }

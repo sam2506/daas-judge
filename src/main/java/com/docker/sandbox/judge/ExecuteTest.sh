@@ -24,7 +24,7 @@ EXIT_STATUS=$?
 if [ $EXIT_STATUS -eq 0 ]; then
   echo "user output file generated"
   docker exec $CONTAINER_ID bash -c "diff -B -Z $USER_OUTPUT_FILE_PATH $OUTPUT_FILE_PATH"
-  if [ $EXIT_STATUS -eq 0 ]; then
+  if [ $? -eq 0 ]; then
     echo "test case $TEST_CASE_NO passed"
     exit 0;
   else
