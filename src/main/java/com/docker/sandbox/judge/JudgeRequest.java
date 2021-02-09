@@ -11,7 +11,7 @@ import lombok.Setter;
 @NoArgsConstructor
 @Getter
 @Setter
-public class CompileRequest {
+public class JudgeRequest {
     SubmissionRequest submissionRequest;
     Double timeLimit;
     int memoryLimit;

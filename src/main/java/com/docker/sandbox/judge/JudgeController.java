@@ -140,7 +140,7 @@ public class JudgeController {
     }
 
     private Verdict executeTest(SubmissionRequest submissionRequest,
-                                CompileRequest compileRequest,
+                                JudgeRequest judgeRequest,
                                 CompilerDetails compilerDetails,
                                 String containerId, String testCaseNo) {
         String userName = submissionRequest.getUserName();
@@ -153,8 +153,8 @@ public class JudgeController {
                     , compilerDetails.getExecutable()
                     , containerId, testCaseNo
                     , "/home/" + submissionRequest.getSubmissionId()
-                    , compileRequest.getTimeLimit().toString()
-                    , "" + compileRequest.getMemoryLimit()
+                    , judgeRequest.getTimeLimit().toString()
+                    , "" + judgeRequest.getMemoryLimit()
             };
             Process process = Runtime.getRuntime().exec(executeTestScript);
             printResults(process);
@@ -195,9 +195,8 @@ public class JudgeController {
     }
 
     @RequestMapping(value = "/judge", method = RequestMethod.POST)
-    public String judgeSubmission(@RequestBody CompileRequest compileRequest) {
-        System.out.println(compileRequest);
-        SubmissionRequest submissionRequest = compileRequest.getSubmissionRequest();
+    public String judgeSubmission(@RequestBody JudgeRequest judgeRequest) {
+        SubmissionRequest submissionRequest = judgeRequest.getSubmissionRequest();
         String language = submissionRequest.getLanguageId().toString();
         String userName = submissionRequest.getUserName();
         CompilerDetails compilerDetails = getCompilerDetails(language);
@@ -209,6 +208,7 @@ public class JudgeController {
                 boolean isCompilationSuccessful =
                         compileCode(submissionRequest, compilerDetails, containerId);
                 if (isCompilationSuccessful) {
+                    template.convertAndSend(exchange, routingKey, "compilation succeeded");
                     for (int i = 0; i < noOfTestCases; i++) {
                         String testCaseNo;
                         if (i <= 9)
@@ -216,7 +216,7 @@ public class JudgeController {
                         else
                             testCaseNo = "" + i;
                         Verdict verdict = executeTest(submissionRequest,
-                                compileRequest, compilerDetails, containerId, testCaseNo);
+                                judgeRequest, compilerDetails, containerId, testCaseNo);
                         if(!verdict.equals(Verdict.AC))
                             finalVerdict = "WA";
                         TestCaseResponse testCaseResponse = new TestCaseResponse();
