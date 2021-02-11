@@ -1,8 +1,10 @@
 package com.docker.sandbox.judge;
 
+import com.docker.sandbox.amazons3.AmazonS3Service;
 import com.docker.sandbox.judge.entities.CompilerDetails;
 import com.docker.sandbox.submission.entities.SubmissionRequest;
 import com.docker.sandbox.testcase.TestCaseResponse;
+import com.docker.sandbox.util.UnzipFile;
 import com.docker.sandbox.verdict.Verdict;
 import lombok.Setter;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -14,10 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 
 @Component
 @ConfigurationProperties(prefix = "completed.testcases")
@@ -28,10 +27,11 @@ public class JudgeController {
     private String exchange;
     private String routingKey;
 
+    private final String PROJECT_DIRECTORY = System.getProperty("user.dir");
     private final String CURRENT_DIRECTORY =  System.getProperty("user.dir") +
             "/src/main/java/com/docker/sandbox/judge";
-    private final String SANDBOX_DIRECTORY = System.getProperty("user.dir") +
-            "/src/main/java/com/docker/sandbox";
+//    private final String SANDBOX_DIRECTORY = System.getProperty("user.dir") +
+//            "/src/main/java/com/docker/sandbox";
     private final String[][] COMPILERS = {
             {"CPP", "g++", ".cpp", "a.out"},
             {"C", "gcc", ".c", "a.out"},
@@ -45,6 +45,9 @@ public class JudgeController {
 
     @Autowired
     private RabbitTemplate template;
+
+    @Autowired
+    private AmazonS3Service amazonS3Service;
 
     public static void printResults(Process proc) throws IOException {
         try
@@ -103,7 +106,7 @@ public class JudgeController {
             String[] cmd = {
                 "/bin/sh",
                 "-c",
-                "ls " + SANDBOX_DIRECTORY + "/" + testsFolderName + " " + "| grep 'input-.*.txt' | wc -l"
+                "ls " + PROJECT_DIRECTORY + "/" + testsFolderName + "/input" + " " + "| grep 'input-.*.txt' | wc -l"
             };
             Process process = Runtime.getRuntime().exec(cmd);
             noOfTestCases = Integer.parseInt(getOutputOfProcess(process));
@@ -177,9 +180,9 @@ public class JudgeController {
         return verdict;
     }
 
-    public String createSandbox(SubmissionRequest submissionRequest) {
+    private String createSandbox(SubmissionRequest submissionRequest) {
         String[] sandboxRunnerScript = {"sh", CURRENT_DIRECTORY + "/RunSandbox.sh",
-                SANDBOX_DIRECTORY + "/" + submissionRequest.getSubmissionId()
+                PROJECT_DIRECTORY + "/" + submissionRequest.getSubmissionId()
                 , "/home/" + submissionRequest.getSubmissionId()
         };
         String containerId = "";
@@ -194,12 +197,42 @@ public class JudgeController {
         return containerId;
     }
 
+    private String downloadTestCasesOfProblem(String problemId) {
+        final byte[] data = amazonS3Service.downloadFile(problemId);
+        String downloadedFilePath = PROJECT_DIRECTORY + "/" + problemId + ".zip";
+        File downloadedFile = new File(downloadedFilePath);
+        try {
+            OutputStream os = new FileOutputStream(downloadedFile);
+            os.write(data);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return downloadedFilePath;
+    }
+
+    private void copyCodeToFile(String code, String codeFilePath) {
+        try {
+            File codeFile = new File(codeFilePath);
+            FileWriter myWriter = new FileWriter(codeFilePath);
+            myWriter.write(code);
+            myWriter.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     @RequestMapping(value = "/judge", method = RequestMethod.POST)
     public String judgeSubmission(@RequestBody JudgeRequest judgeRequest) {
         SubmissionRequest submissionRequest = judgeRequest.getSubmissionRequest();
         String language = submissionRequest.getLanguageId().toString();
         String userName = submissionRequest.getUserName();
         CompilerDetails compilerDetails = getCompilerDetails(language);
+        String testCaseZipFilePath = downloadTestCasesOfProblem(submissionRequest.getProblemId());
+        UnzipFile.unzipFile(testCaseZipFilePath, PROJECT_DIRECTORY + "/" +
+                submissionRequest.getSubmissionId());
+        copyCodeToFile(submissionRequest.getCode(), PROJECT_DIRECTORY + "/" +
+                submissionRequest.getSubmissionId() + "/" +
+                submissionRequest.getUserName() + compilerDetails.getExtension());
         int noOfTestCases = getNoOfTestCases(submissionRequest.getSubmissionId());
         String finalVerdict = "AC";
         try {
