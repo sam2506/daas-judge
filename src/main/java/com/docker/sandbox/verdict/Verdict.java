@@ -5,5 +5,6 @@ public enum Verdict {
     RE,
     AC,
     TLE,
-    MLE
+    MLE,
+    CE
 }

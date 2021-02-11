@@ -2,7 +2,7 @@ package com.docker.sandbox.judge;
 
 import com.docker.sandbox.amazons3.AmazonS3Service;
 import com.docker.sandbox.judge.entities.CompilerDetails;
-import com.docker.sandbox.submission.entities.SubmissionRequest;
+import com.docker.sandbox.submission.SubmissionRequest;
 import com.docker.sandbox.testcase.TestCaseResponse;
 import com.docker.sandbox.util.UnzipFile;
 import com.docker.sandbox.verdict.Verdict;
@@ -30,8 +30,9 @@ public class JudgeController {
     private final String PROJECT_DIRECTORY = System.getProperty("user.dir");
     private final String CURRENT_DIRECTORY =  System.getProperty("user.dir") +
             "/src/main/java/com/docker/sandbox/judge";
-//    private final String SANDBOX_DIRECTORY = System.getProperty("user.dir") +
-//            "/src/main/java/com/docker/sandbox";
+    private final String RUN_SANDBOX_SCRIPT_PATH = CURRENT_DIRECTORY + "/RunSandbox.sh";
+    private final String EXECUTE_TEST_SCRIPT_PATH = CURRENT_DIRECTORY + "/ExecuteTest.sh";
+    private final String COMPILE_SCRIPT_PATH = CURRENT_DIRECTORY + "/Compile.sh";
     private final String[][] COMPILERS = {
             {"CPP", "g++", ".cpp", "a.out"},
             {"C", "gcc", ".c", "a.out"},
@@ -41,7 +42,7 @@ public class JudgeController {
     private final int WRONG_ANSWER_EXIT_STATUS = 1;
     private final int TIMEOUT_EXIT_STATUS = 124;
     private final int RUNTIME_ERROR_EXIT_STATUS = 134;
-    private final int MEMORY_LIMIT_EXCEEDED_EXIT_STATUS = 134;
+    private final int MEMORY_LIMIT_EXCEEDED_EXIT_STATUS = 139;
 
     @Autowired
     private RabbitTemplate template;
@@ -121,9 +122,9 @@ public class JudgeController {
         String userName = submissionRequest.getUserName();
         boolean isCompilationSuccessful = false;
         try {
-            Runtime.getRuntime().exec("chmod +x " + CURRENT_DIRECTORY + "/Compile.sh");
+            Runtime.getRuntime().exec("chmod +x " + COMPILE_SCRIPT_PATH);
             String[] compileScript = {
-                    "sh", CURRENT_DIRECTORY + "/Compile.sh",
+                    "sh", COMPILE_SCRIPT_PATH,
                     compilerDetails.getCompilerName(),
                     "" + userName + compilerDetails.getExtension()
                     , containerId
@@ -149,8 +150,8 @@ public class JudgeController {
         String userName = submissionRequest.getUserName();
         Verdict verdict = Verdict.MLE;
         try {
-            Runtime.getRuntime().exec("chmod +x " + CURRENT_DIRECTORY + "/ExecuteTest.sh");
-            String[] executeTestScript = {"sh", CURRENT_DIRECTORY + "/ExecuteTest.sh",
+            Runtime.getRuntime().exec("chmod +x " + EXECUTE_TEST_SCRIPT_PATH);
+            String[] executeTestScript = {"sh", EXECUTE_TEST_SCRIPT_PATH,
                     compilerDetails.getCompilerName(),
                     "" + userName + compilerDetails.getExtension()
                     , compilerDetails.getExecutable()
@@ -181,13 +182,13 @@ public class JudgeController {
     }
 
     private String createSandbox(SubmissionRequest submissionRequest) {
-        String[] sandboxRunnerScript = {"sh", CURRENT_DIRECTORY + "/RunSandbox.sh",
+        String[] sandboxRunnerScript = {"sh", RUN_SANDBOX_SCRIPT_PATH,
                 PROJECT_DIRECTORY + "/" + submissionRequest.getSubmissionId()
                 , "/home/" + submissionRequest.getSubmissionId()
         };
         String containerId = "";
         try {
-            Runtime.getRuntime().exec("chmod +x " + CURRENT_DIRECTORY + "/RunSandbox.sh");
+            Runtime.getRuntime().exec("chmod +x " + RUN_SANDBOX_SCRIPT_PATH);
             Process process = Runtime.getRuntime().exec(sandboxRunnerScript);
             process.waitFor();
             containerId = getOutputOfProcess(process);
@@ -225,7 +226,6 @@ public class JudgeController {
     public String judgeSubmission(@RequestBody JudgeRequest judgeRequest) {
         SubmissionRequest submissionRequest = judgeRequest.getSubmissionRequest();
         String language = submissionRequest.getLanguageId().toString();
-        String userName = submissionRequest.getUserName();
         CompilerDetails compilerDetails = getCompilerDetails(language);
         String testCaseZipFilePath = downloadTestCasesOfProblem(submissionRequest.getProblemId());
         UnzipFile.unzipFile(testCaseZipFilePath, PROJECT_DIRECTORY + "/" +
@@ -234,7 +234,7 @@ public class JudgeController {
                 submissionRequest.getSubmissionId() + "/" +
                 submissionRequest.getUserName() + compilerDetails.getExtension());
         int noOfTestCases = getNoOfTestCases(submissionRequest.getSubmissionId());
-        String finalVerdict = "AC";
+        Verdict finalVerdict = Verdict.AC;
         try {
             String containerId = createSandbox(submissionRequest);
             if(!compilerDetails.getExecutable().equals("")) {
@@ -251,14 +251,14 @@ public class JudgeController {
                         Verdict verdict = executeTest(submissionRequest,
                                 judgeRequest, compilerDetails, containerId, testCaseNo);
                         if(!verdict.equals(Verdict.AC))
-                            finalVerdict = "WA";
+                            finalVerdict = Verdict.WA;
                         TestCaseResponse testCaseResponse = new TestCaseResponse();
                         testCaseResponse.setTestCaseNo(i);
                         testCaseResponse.setVerdict(verdict);
                         template.convertAndSend(exchange, routingKey, testCaseResponse);
                     }
                 } else {
-                    finalVerdict = "CE";
+                    finalVerdict = Verdict.CE;
                     template.convertAndSend(exchange, routingKey, "compilation failed");
                 }
             }
@@ -266,6 +266,6 @@ public class JudgeController {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return finalVerdict;
+        return finalVerdict.toString();
     }
 }

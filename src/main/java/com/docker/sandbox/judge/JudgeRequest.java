@@ -1,7 +1,7 @@
 package com.docker.sandbox.judge;
 
 
-import com.docker.sandbox.submission.entities.SubmissionRequest;
+import com.docker.sandbox.submission.SubmissionRequest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

@@ -1,4 +1,4 @@
-package com.docker.sandbox.submission.entities;
+package com.docker.sandbox.submission;
 
 import com.docker.sandbox.language.Language;
 import lombok.AllArgsConstructor;
