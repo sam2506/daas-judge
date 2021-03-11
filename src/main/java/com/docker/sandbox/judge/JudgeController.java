@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.*;
+import java.util.concurrent.*;
 
 @Component
 @ConfigurationProperties(prefix = "completed.testcases")
@@ -242,19 +243,24 @@ public class JudgeController {
                         compileCode(submissionRequest, compilerDetails, containerId);
                 if (isCompilationSuccessful) {
                     template.convertAndSend(exchange, routingKey, "compilation succeeded");
+                    ExecutorService testExecutorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                    CompletionService<TestCaseResponse> testCompletionService = new
+                            ExecutorCompletionService<TestCaseResponse> (testExecutorService);
                     for (int i = 0; i < noOfTestCases; i++) {
                         String testCaseNo;
                         if (i <= 9)
                             testCaseNo = "0" + i;
                         else
                             testCaseNo = "" + i;
-                        Verdict verdict = executeTest(submissionRequest,
+                        TestExecutor testExecutor = new TestExecutor(submissionRequest,
                                 judgeRequest, compilerDetails, containerId, testCaseNo);
-                        if(!verdict.equals(Verdict.AC))
+                        testCompletionService.submit(testExecutor);
+                    }
+                    for (int i = 0; i < noOfTestCases; i++) {
+                        Future<TestCaseResponse> testCaseResponseFuture = testCompletionService.take();
+                        TestCaseResponse testCaseResponse = testCaseResponseFuture.get();
+                        if(!testCaseResponse.getVerdict().equals(Verdict.AC))
                             finalVerdict = Verdict.WA;
-                        TestCaseResponse testCaseResponse = new TestCaseResponse();
-                        testCaseResponse.setTestCaseNo(i);
-                        testCaseResponse.setVerdict(verdict);
                         template.convertAndSend(exchange, routingKey, testCaseResponse);
                     }
                 } else {
@@ -263,7 +269,7 @@ public class JudgeController {
                 }
             }
             Runtime.getRuntime().exec("docker rm -f " + containerId);
-        } catch (IOException e) {
+        } catch (InterruptedException | ExecutionException | IOException e) {
             e.printStackTrace();
         }
         return finalVerdict.toString();
