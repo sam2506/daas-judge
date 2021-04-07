@@ -13,4 +13,6 @@ import lombok.Setter;
 public class TestCaseResponse {
     int testCaseNo;
     Verdict verdict;
+    String submissionId;
+    String userName;
 }

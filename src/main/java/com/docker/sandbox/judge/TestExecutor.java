@@ -58,6 +58,8 @@ public class TestExecutor implements Callable<TestCaseResponse> {
             }
             testCaseResponse.setTestCaseNo(Integer.parseInt(testCaseNo));
             testCaseResponse.setVerdict(verdict);
+            testCaseResponse.setUserName(userName);
+            testCaseResponse.setSubmissionId(submissionRequest.getSubmissionId());
         } catch (Throwable t) {
             t.printStackTrace();
         }
