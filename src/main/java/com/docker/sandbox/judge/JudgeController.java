@@ -1,6 +1,7 @@
 package com.docker.sandbox.judge;
 
 import com.docker.sandbox.amazons3.AmazonS3Service;
+import com.docker.sandbox.compiler.CompilationResponse;
 import com.docker.sandbox.judge.entities.CompilerDetails;
 import com.docker.sandbox.submission.SubmissionRequest;
 import com.docker.sandbox.testcase.TestCaseResponse;
@@ -242,7 +243,9 @@ public class JudgeController {
                 boolean isCompilationSuccessful =
                         compileCode(submissionRequest, compilerDetails, containerId);
                 if (isCompilationSuccessful) {
-                    template.convertAndSend(exchange, routingKey, "compilation succeeded");
+                    CompilationResponse compilationResponse = new CompilationResponse(true,
+                            noOfTestCases, submissionRequest.getSubmissionId(), submissionRequest.getUserName());
+                    template.convertAndSend(exchange, routingKey, compilationResponse);
                     ExecutorService testExecutorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
                     CompletionService<TestCaseResponse> testCompletionService = new
                             ExecutorCompletionService<TestCaseResponse> (testExecutorService);
@@ -265,7 +268,9 @@ public class JudgeController {
                     }
                 } else {
                     finalVerdict = Verdict.CE;
-                    template.convertAndSend(exchange, routingKey, "compilation failed");
+                    CompilationResponse compilationResponse = new CompilationResponse(false,
+                            noOfTestCases, submissionRequest.getSubmissionId(), submissionRequest.getUserName());
+                    template.convertAndSend(exchange, routingKey, compilationResponse);
                 }
             }
             Runtime.getRuntime().exec("docker rm -f " + containerId);
