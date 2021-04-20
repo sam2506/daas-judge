@@ -4,18 +4,16 @@ import com.docker.sandbox.amazons3.AmazonS3Service;
 import com.docker.sandbox.compiler.CompilationResponse;
 import com.docker.sandbox.judge.entities.CompilerDetails;
 import com.docker.sandbox.submission.SubmissionRequest;
+import com.docker.sandbox.submission.SubmissionResponse;
 import com.docker.sandbox.testcase.TestCaseResponse;
 import com.docker.sandbox.util.UnzipFile;
 import com.docker.sandbox.verdict.Verdict;
 import lombok.Setter;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RestController;
 
 import java.io.*;
 import java.util.concurrent.*;
@@ -23,7 +21,6 @@ import java.util.concurrent.*;
 @Component
 @ConfigurationProperties(prefix = "completed.testcases")
 @Setter
-@RestController
 public class JudgeController {
 
     private String exchange;
@@ -224,8 +221,8 @@ public class JudgeController {
         }
     }
 
-    @RequestMapping(value = "/judge", method = RequestMethod.POST)
-    public String judgeSubmission(@RequestBody JudgeRequest judgeRequest) {
+    @RabbitListener(queues = "submission_queue")
+    public void judgeSubmission(JudgeRequest judgeRequest) {
         SubmissionRequest submissionRequest = judgeRequest.getSubmissionRequest();
         String language = submissionRequest.getLanguageId().toString();
         CompilerDetails compilerDetails = getCompilerDetails(language);
@@ -277,6 +274,7 @@ public class JudgeController {
         } catch (InterruptedException | ExecutionException | IOException e) {
             e.printStackTrace();
         }
-        return finalVerdict.toString();
+        template.convertAndSend(exchange, routingKey, new SubmissionResponse(submissionRequest.getSubmissionId(),
+                submissionRequest.getUserName(), submissionRequest.getContestId(), finalVerdict));
     }
 }
